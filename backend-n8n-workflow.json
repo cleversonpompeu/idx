@@ -1,0 +1,127 @@
+{
+  "_comment": "Workflow n8n para WhatsApp Embedded Signup - Importar no n8n",
+  "_comment2": "Recebe o code do frontend, troca por token, e retorna waba_id + phone_number_id",
+  "name": "WhatsApp Embedded Signup Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-signup",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "webhook-node",
+      "name": "Webhook - Signup",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://graph.facebook.com/v21.0/oauth/access_token?client_id=852417467117358&client_secret=4c481c5c2d5e1cda14e5ad0e583ef58b&code={{ $json.body.code }}",
+        "options": {}
+      },
+      "id": "exchange-token",
+      "name": "Trocar Code por Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://graph.facebook.com/v21.0/debug_token?input_token={{ $json.access_token }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer EAAMHROhT7y4BRG3jJ1oHZBSgxWfnhskvRvll8klJfW5vA4bdKoor47olNZBJ4r7iEIZCuNXvLwytZBH0bZBZAcCFq5MPpsRPWNfzHES1PzxZAiRHgQR0b6lZCwKEZAdIge1ueASxJ5F1E1nQaoXt59sb6Y4Smx5ebPbupZBq39ZBVwUw5BAiXqj09xWokU8P4XRjmkoFyTtjViroLOePQVZAknBS80SJFCkBmZAKMGxdqrZBlcyO90EeQ2WfZBi"
+            }
+          ]
+        }
+      },
+      "id": "debug-token",
+      "name": "Debug Token - Get WABA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrai WABA ID e Phone Number ID do debug_token\nconst debugData = $input.first().json.data;\nconst granularScopes = debugData.granular_scopes || [];\n\n// Encontra o scope whatsapp_business_management para pegar o WABA ID\nconst wabaScope = granularScopes.find(s => s.scope === 'whatsapp_business_management');\nconst wabaIds = wabaScope ? wabaScope.target_ids : [];\n\n// Pega o token do cliente (do node anterior ao debug)\nconst allItems = $('Trocar Code por Token').all();\nconst clientToken = allItems[0].json.access_token;\n\nreturn [{\n  json: {\n    success: true,\n    waba_ids: wabaIds,\n    waba_id: wabaIds[wabaIds.length - 1] || null,\n    client_token: clientToken,\n    user_id: debugData.user_id,\n    app_id: debugData.app_id,\n    scopes: debugData.scopes\n  }\n}];"
+      },
+      "id": "extract-data",
+      "name": "Extrair WABA IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://graph.facebook.com/v21.0/{{ $json.waba_id }}/phone_numbers?fields=id,display_phone_number,verified_name,quality_rating,status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.client_token }}"
+            }
+          ]
+        }
+      },
+      "id": "get-phone",
+      "name": "Buscar Phone Numbers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const extractData = $('Extrair WABA IDs').first().json;\nconst phoneData = $input.first().json;\nconst phones = phoneData.data || [];\nconst firstPhone = phones[0] || {};\n\nreturn [{\n  json: {\n    success: true,\n    waba_id: extractData.waba_id,\n    phone_number_id: firstPhone.id || null,\n    display_phone: firstPhone.display_phone_number || null,\n    verified_name: firstPhone.verified_name || null,\n    quality_rating: firstPhone.quality_rating || null,\n    status: firstPhone.status || null,\n    all_phones: phones,\n    user_id: extractData.user_id\n  }\n}];"
+      },
+      "id": "format-response",
+      "name": "Formatar Resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1570, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Signup": { "main": [[{ "node": "Trocar Code por Token", "type": "main", "index": 0 }]] },
+    "Trocar Code por Token": { "main": [[{ "node": "Debug Token - Get WABA", "type": "main", "index": 0 }]] },
+    "Debug Token - Get WABA": { "main": [[{ "node": "Extrair WABA IDs", "type": "main", "index": 0 }]] },
+    "Extrair WABA IDs": { "main": [[{ "node": "Buscar Phone Numbers", "type": "main", "index": 0 }]] },
+    "Buscar Phone Numbers": { "main": [[{ "node": "Formatar Resposta", "type": "main", "index": 0 }]] },
+    "Formatar Resposta": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  }
+}
